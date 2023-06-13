@@ -448,6 +448,8 @@ void ContourTree::DoExecute()
   //Convert the mesh of values into contour tree, pairs of vertex ids
   vtkm::filter::scalar_topology::ContourTreeAugmented filter(useMarchingCubes, computeRegularStructure);
 
+  filterField = &filter;
+
 #ifdef DEBUG
   std::cout << "--- BEGIN_SUMMARY inDataSet" << std::endl;
   inDataSet.PrintSummary( std::cout );
@@ -484,7 +486,7 @@ void ContourTree::DoExecute()
 
 #ifndef VTKH_PARALLEL
   if (mpi_rank == 0) {
-    AnalyzerFunctor analyzerFunctor(*this, filter);
+    AnalyzerFunctor analyzerFunctor(*this, &filter);
     analyzerFunctor.SetDataFieldIsSorted(false);
     vtkm::cont::CastAndCall(inDataSet.GetField(m_field_name).GetData(), analyzerFunctor);
   } // mpi_rank == 0
