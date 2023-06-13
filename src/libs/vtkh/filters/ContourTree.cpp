@@ -211,12 +211,12 @@ void ContourTree::PostExecute()
 
 struct AnalyzerFunctor
 {
-  vtkm::filter::scalar_topology::ContourTreeAugmented& filter;
+  vtkm::filter::scalar_topology::ContourTreeAugmented* filter;
   vtkh::ContourTree& contourTree;
   bool dataFieldIsSorted;
 
   public:
-  AnalyzerFunctor(vtkh::ContourTree& contourTree, vtkm::filter::scalar_topology::ContourTreeAugmented& filter): contourTree(contourTree), filter(filter)  {
+  AnalyzerFunctor(vtkh::ContourTree& contourTree, vtkm::filter::scalar_topology::ContourTreeAugmented* filter): contourTree(contourTree), filter(filter)  {
   }
 
   void SetDataFieldIsSorted(bool dataFieldIsSorted) {
@@ -225,12 +225,12 @@ struct AnalyzerFunctor
 
   void operator()(const vtkm::cont::ArrayHandle<vtkm::Float32> &arr) const
   {
-     contourTree.analysis<vtkm::Float32>(filter, dataFieldIsSorted, arr);
+     contourTree.analysis<vtkm::Float32>(*filter, dataFieldIsSorted, arr);
   }
 
   void operator()(const vtkm::cont::ArrayHandle<vtkm::Float64> &arr) const
   {
-     contourTree.analysis<vtkm::Float64>(filter, dataFieldIsSorted, arr);
+     contourTree.analysis<vtkm::Float64>(*filter, dataFieldIsSorted, arr);
   }
 
   template <typename T>
@@ -437,6 +437,8 @@ void ContourTree::DoExecute()
 #endif
 #endif // VTKH_PARALLEL
 
+  vtkm::filter::FilterField *filterField;
+
 #ifndef VTKH_PARALLEL
   bool useMarchingCubes = false;
   // Compute the fully augmented contour tree.
@@ -454,12 +456,18 @@ void ContourTree::DoExecute()
 #else // VTKH_PARALLEL
   // TODO If we only have one partition use augmented ....
   vtkm::filter::scalar_topology::ContourTreeUniformDistributed filter;
+  vtkm::filter::scalar_topology::ContourTreeAugmented aug_filter(false, true);
 
-  filter.SetUseBoundaryExtremaOnly(true);
-  filter.SetUseMarchingCubes(false);
-  filter.SetAugmentHierarchicalTree(true);
-  ShiftLogicalOriginToZero(inDataSet);
-  ComputeGlobalPointSize(inDataSet);
+  if (mpi_size == 1) {
+    filterField = &aug_filter;
+  } else {
+    filter.SetUseBoundaryExtremaOnly(true);
+    filter.SetUseMarchingCubes(false);
+    filter.SetAugmentHierarchicalTree(true);
+    ShiftLogicalOriginToZero(inDataSet);
+    ComputeGlobalPointSize(inDataSet);
+    filterField = &filter;
+  }
 
 #ifdef DEBUG
   std::cout << "--- BEGIN_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
@@ -468,9 +476,9 @@ void ContourTree::DoExecute()
 #endif
 #endif // VTKH_PARALLEL
 
-  filter.SetActiveField(m_field_name);
+  filterField->SetActiveField(m_field_name);
 
-  auto result = filter.Execute(inDataSet);
+  auto result = filterField->Execute(inDataSet);
 
   m_iso_values.resize(m_levels);
 
@@ -481,6 +489,7 @@ void ContourTree::DoExecute()
     vtkm::cont::CastAndCall(inDataSet.GetField(m_field_name).GetData(), analyzerFunctor);
   } // mpi_rank == 0
 #else
+  if (mpi_size > 1) 
   { // AES BranchDecomposition
         vtkm::filter::scalar_topology::DistributedBranchDecompositionFilter bd_filter;
         auto bd_result = bd_filter.Execute(result);
@@ -498,27 +507,13 @@ void ContourTree::DoExecute()
                  ds);
         }
    } 
+   else 
+   {
+     AnalyzerFunctor analyzerFunctor(*this, (vtkm::filter::scalar_topology::ContourTreeAugmented *) filterField);
 
-#if 0 // AES
-    AnalyzerFunctor analyzerFunctor(*this, filter);
-    if(mpi_size == 1)
-    {
-      analyzerFunctor.SetDataFieldIsSorted(false);
-      vtkm::cont::CastAndCall(inDataSet.GetPartitions()[0].GetField(m_field_name).GetData(), analyzerFunctor);
-    } else {
-      analyzerFunctor.SetDataFieldIsSorted(true);
-
-      /*
-      if( result.GetPartitions()[0].GetNumberOfFields() > 1 ) {
-        vtkm::cont::CastAndCall(result.GetPartitions()[0].GetField("values").GetData(), analyzerFunctor);
-      } else {
-        vtkm::cont::CastAndCall(result.GetPartitions()[0].GetField(0).GetData(), analyzerFunctor);
-      }*/
-
-      // TODO TO BE REVISITED. Tested with: srun -n 8 ./t_vtk-h_contour_tree_par 
-      vtkm::cont::CastAndCall(result.GetPartitions()[0].GetField("resultData").GetData(), analyzerFunctor);
-    }
-#endif
+     analyzerFunctor.SetDataFieldIsSorted(false);
+     vtkm::cont::CastAndCall(inDataSet.GetPartitions()[0].GetField(m_field_name).GetData(), analyzerFunctor);
+   }
 #endif // VTKH_PARALLEL
 
 #ifdef VTKH_PARALLEL
