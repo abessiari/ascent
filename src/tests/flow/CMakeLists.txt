@@ -12,6 +12,7 @@
 ################################
 # Flow Unit Tests
 ################################
+if(NOT ENABLE_MPI)
 set(FLOW_TESTS  t_flow_data
                 t_flow_timer
                 t_flow_registry
@@ -38,4 +39,5 @@ if(PYTHON_FOUND AND ENABLE_PYTHON)
     add_subdirectory("python")
 else()
     message(STATUS "Python disabled: Skipping ascent python module tests")
+endif()
 endif()

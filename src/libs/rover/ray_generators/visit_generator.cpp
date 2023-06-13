@@ -75,7 +75,7 @@ VisitGenerator::gen_rays(vtkmRayTracing::Ray<T> &rays)
 
   const int size = m_width * m_height;
 
-  rays.Resize(size, vtkm::cont::DeviceAdapterTagSerial());
+  // AES rays.Resize(size, vtkm::cont::DeviceAdapterTagSerial());
 
   vtkm::Vec<T,3> view_side;
 
@@ -205,13 +205,13 @@ VisitGenerator::gen_rays(vtkmRayTracing::Ray<T> &rays)
 void
 VisitGenerator::get_rays(vtkmRayTracing::Ray<vtkm::Float32> &rays)
 {
-  gen_rays(rays);
+  // AES gen_rays(rays);
 }
 
 void
 VisitGenerator::get_rays(vtkmRayTracing::Ray<vtkm::Float64> &rays)
 {
-  gen_rays(rays);
+  // AES gen_rays(rays);
 }
 
 void

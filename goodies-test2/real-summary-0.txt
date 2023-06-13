@@ -1,0 +1,26 @@
+
+
+--- BEGIN_REAL_SUMMARY inDataSet:mpi_rank=0
+PartitionedDataSet [1 partitions]:
+Partition 0:
+DataSet:
+  CoordSystems[1]
+    coords
+  CellSet 
+  StructuredCellSet:
+   UniformConnectivity<3> PointDimensions[33 33 129] GlobalPointDimensions[33 33 257] GlobalPointIndexStart[0 0 0] 
+  Fields[12]
+   Bx assoc= Cells valueType=float storageType=vtkm::cont::StorageTagBasic 131072 values occupying 524288 bytes [0 0 0 ... 0 0 0]
+   By assoc= Cells valueType=float storageType=vtkm::cont::StorageTagBasic 131072 values occupying 524288 bytes [0 0 0 ... 0 0 0]
+   Bz assoc= Cells valueType=float storageType=vtkm::cont::StorageTagBasic 131072 values occupying 524288 bytes [0 0 0 ... 0 0 0]
+   Ex assoc= Cells valueType=float storageType=vtkm::cont::StorageTagBasic 131072 values occupying 524288 bytes [0 0 0 ... 0 0 0]
+   Ey assoc= Points valueType=float storageType=vtkm::cont::StorageTagBasic 140481 values occupying 561924 bytes [0 0 0 ... 0 0 0]
+   Ez assoc= Cells valueType=float storageType=vtkm::cont::StorageTagBasic 131072 values occupying 524288 bytes [0 0 0 ... 0 0 0]
+   ascent_ghosts assoc= Cells valueType=double storageType=vtkm::cont::StorageTagBasic 131072 values occupying 1048576 bytes [0 0 0 ... 0 0 0]
+   coords assoc= Points valueType=vtkm::Vec<double, 3> storageType=vtkm::cont::StorageTagUniformPoints 140481 values occupying 3371544 bytes [(-3e-05,-3e-05,-5.36094e-05) (-2.8125e-05,-3e-05,-5.36094e-05) (-2.625e-05,-3e-05,-5.36094e-05) ... (2.625e-05,3e-05,-1.96094e-05) (2.8125e-05,3e-05,-1.96094e-05) (3e-05,3e-05,-1.96094e-05)]
+   jx assoc= Cells valueType=float storageType=vtkm::cont::StorageTagBasic 131072 values occupying 524288 bytes [0 0 0 ... 0 0 0]
+   jy assoc= Cells valueType=float storageType=vtkm::cont::StorageTagBasic 131072 values occupying 524288 bytes [0 0 0 ... 0 0 0]
+   jz assoc= Cells valueType=float storageType=vtkm::cont::StorageTagBasic 131072 values occupying 524288 bytes [0 0 0 ... 0 0 0]
+   rho assoc= Cells valueType=float storageType=vtkm::cont::StorageTagBasic 131072 values occupying 524288 bytes [0 0 0 ... 0 0 0]
+  Fields[0]
+--- END_REAL_SUMMARY inDataSet:mpi_rank=0

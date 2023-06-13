@@ -62,6 +62,7 @@ CameraGenerator::~CameraGenerator()
 void
 CameraGenerator::get_rays(vtkmRayTracing::Ray<vtkm::Float32> &rays)
 {
+	/* AES
   vtkm::rendering::CanvasRayTracer canvas(m_width, m_height);
   vtkm::rendering::raytracing::Camera ray_gen;
   ray_gen.SetParameters(m_camera, m_width, m_height);
@@ -69,11 +70,13 @@ CameraGenerator::get_rays(vtkmRayTracing::Ray<vtkm::Float32> &rays)
   ray_gen.CreateRays(rays, this->m_coordinates.GetBounds());
   this->m_has_rays = false;
   if(rays.NumRays == 0) std::cout<<"CameraGenerator Warning no rays were generated\n";
+  */
 }
 
 void
 CameraGenerator::get_rays(vtkmRayTracing::Ray<vtkm::Float64> &rays)
 {
+	/* AES
   vtkm::rendering::CanvasRayTracer canvas(m_width, m_height);
   vtkm::rendering::raytracing::Camera ray_gen;
   ray_gen.SetParameters(m_camera, m_width, m_height);
@@ -81,6 +84,7 @@ CameraGenerator::get_rays(vtkmRayTracing::Ray<vtkm::Float64> &rays)
   ray_gen.CreateRays(rays, this->m_coordinates.GetBounds());
   this->m_has_rays = false;
   if(rays.NumRays == 0) std::cout<<"CameraGenerator Warning no rays were generated\n";
+  */
 }
 
 vtkmCamera
