@@ -446,62 +446,31 @@ void ContourTree::DoExecute()
   //Convert the mesh of values into contour tree, pairs of vertex ids
   vtkm::filter::scalar_topology::ContourTreeAugmented filter(useMarchingCubes, computeRegularStructure);
 
+#ifdef DEBUG
+  std::cout << "--- BEGIN_SUMMARY inDataSet" << std::endl;
+  inDataSet.PrintSummary( std::cout );
+  std::cout << "--- END_SUMMARY inDataSet" << std::endl;
+#endif
 #else // VTKH_PARALLEL
-  // AES
   // TODO If we only have one partition use augmented ....
   vtkm::filter::scalar_topology::ContourTreeUniformDistributed filter;
 
-  // filter.SetBlockIndices(blocksPerDim, localBlockIndices);
-  bool useBoundaryExtremaOnly = true;   
-  bool useMarchingCubes = false;
-  bool augmentHierarchicalTree = true;
-  bool computeHierarchicalVolumetricBranchDecomposition = true;
-  bool saveDotFiles = false;
+  filter.SetUseBoundaryExtremaOnly(true);
+  filter.SetUseMarchingCubes(false);
+  filter.SetAugmentHierarchicalTree(true);
+  ShiftLogicalOriginToZero(inDataSet);
+  ComputeGlobalPointSize(inDataSet);
 
-  filter.SetUseBoundaryExtremaOnly(useBoundaryExtremaOnly);
-  filter.SetUseMarchingCubes(useMarchingCubes);
-  std::cout << "AES:BEGIN AugmentHierarchicalTree=" <<  augmentHierarchicalTree << std::endl;
-  filter.SetAugmentHierarchicalTree(augmentHierarchicalTree);
-  // filter.SetSaveDotFiles(saveDotFiles);
-#endif 
+#ifdef DEBUG
+  std::cout << "--- BEGIN_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
+  inDataSet.PrintSummary( std::cout );
+  std::cout << "--- END_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
+#endif
+#endif // VTKH_PARALLEL
 
   filter.SetActiveField(m_field_name);
 
-  /*
-  std::cout << "\n\n--- BEGIN_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
-  inDataSet.PrintSummary( std::cout );
-  std::cout << "--- END_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
-  */
-
-#ifdef VTKH_PARALLEL
-    ShiftLogicalOriginToZero(inDataSet);
-    ComputeGlobalPointSize(inDataSet);
-
-
-    std::ostringstream oss;
-
-
-    oss << "real-summary-" << mpi_rank << ".txt";
-
-
-    std::ofstream rs(oss.str());
-
-    rs << "\n\n--- BEGIN_REAL_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
-    inDataSet.PrintSummary(rs);
-    rs << "--- END_REAL_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
-    rs.close();
-
-    /*
-    if (true) {
-       std::cout << "RETURNING EARLY:mpi_rank=" << mpi_rank << std::endl;
-       return;
-    }
-    */
-#endif // VTKH_PARALLEL
-
-  std::cout << "AES:BEFORE_EXECUTE_FILTER:AugmentHierarchicalTree=" <<  augmentHierarchicalTree << std::endl;
   auto result = filter.Execute(inDataSet);
-  std::cout << "AES:END_EXECUTE_FILTER:AugmentHierarchicalTree=" <<  augmentHierarchicalTree << std::endl;
 
   m_iso_values.resize(m_levels);
 
@@ -512,24 +481,7 @@ void ContourTree::DoExecute()
     vtkm::cont::CastAndCall(inDataSet.GetField(m_field_name).GetData(), analyzerFunctor);
   } // mpi_rank == 0
 #else
-
-  if (!augmentHierarchicalTree) {
-        for (vtkm::Id ds_no = 0; ds_no < result.GetNumberOfPartitions(); ++ds_no)
-        {
-          vtkm::worklet::contourtree_distributed::TreeCompiler treeCompiler;
-          treeCompiler.AddHierarchicalTree(result.GetPartition(ds_no));
-          char fname[256];
-          std::snprintf(fname,
-                      sizeof(fname),
-                      "TreeCompilerOutput_Rank%d_Block%d.dat",
-                      mpi_rank,
-                      static_cast<int>(ds_no));
-          FILE* out_file = std::fopen(fname, "wb");
-          treeCompiler.WriteBinary(out_file);
-          std::fclose(out_file);
-        }
-  } else if (computeHierarchicalVolumetricBranchDecomposition)
-  {
+  { // AES BranchDecomposition
         vtkm::filter::scalar_topology::DistributedBranchDecompositionFilter bd_filter;
         auto bd_result = bd_filter.Execute(result);
 
@@ -546,42 +498,6 @@ void ContourTree::DoExecute()
                  ds);
         }
    } 
-   else {
-
-        for (vtkm::Id ds_no = 0; ds_no < result.GetNumberOfPartitions(); ++ds_no)
-        {
-          auto ds = result.GetPartition(ds_no);
-	  vtkm::Id3 globalSize;
-           vtkm::cont::CastAndCall(
-              ds.GetCellSet(), vtkm::worklet::contourtree_augmented::GetPointDimensions(), globalSize);
-          vtkm::worklet::contourtree_augmented::IdArrayType supernodes;
-          ds.GetField("Supernodes").GetData().AsArrayHandle(supernodes);
-          vtkm::worklet::contourtree_augmented::IdArrayType superarcs;
-          ds.GetField("Superarcs").GetData().AsArrayHandle(superarcs);
-          vtkm::worklet::contourtree_augmented::IdArrayType regularNodeGlobalIds;
-          ds.GetField("RegularNodeGlobalIds").GetData().AsArrayHandle(regularNodeGlobalIds);
-          vtkm::Id totalVolume = globalSize[0] * globalSize[1] * globalSize[2];
-          vtkm::worklet::contourtree_augmented::IdArrayType intrinsicVolume;
-          ds.GetField("IntrinsicVolume").GetData().AsArrayHandle(intrinsicVolume);
-          vtkm::worklet::contourtree_augmented::IdArrayType dependentVolume;
-          ds.GetField("DependentVolume").GetData().AsArrayHandle(dependentVolume);
-
-          std::string dumpVolumesString =
-            vtkm::worklet::contourtree_distributed::HierarchicalContourTree<vtkm::Float64>::DumpVolumes(
-              supernodes,
-              superarcs,
-              regularNodeGlobalIds,
-              totalVolume,
-              intrinsicVolume,
-              dependentVolume);
-
-          std::string volumesFileName = std::string("TreeWithVolumes_Rank_") +
-            std::to_string(static_cast<int>(mpi_rank)) + std::string("_Block_") +
-            std::to_string(static_cast<int>(ds_no)) + std::string(".txt");
-          std::ofstream treeStream(volumesFileName.c_str());
-          treeStream << dumpVolumesString;
-        }
-   }
 
 #if 0 // AES
     AnalyzerFunctor analyzerFunctor(*this, filter);
