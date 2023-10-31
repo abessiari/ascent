@@ -3,16 +3,6 @@
 #include <vtkh/filters/Recenter.hpp>
 
 // vtkm includes
-/* AES
-#include <vtkm/cont/DeviceAdapter.h>
-#include <vtkm/cont/Storage.h>
-#include <vtkm/internal/Configure.h>
-#include <vtkm/filter/scalar_topology/worklet/contourtree_augmented/PrintVectors.h>
-#include <vtkm/filter/scalar_topology/worklet/contourtree_augmented/ProcessContourTree.h>
-#include <vtkm/filter/scalar_topology/worklet/contourtree_augmented/processcontourtree/Branch.h>
-#include <vtkm/filter/scalar_topology/worklet/contourtree_augmented/processcontourtree/PiecewiseLinearFunction.h>
-*/
-
 #include <vtkm/filter/scalar_topology/ContourTreeUniformDistributed.h>
 #include <vtkm/filter/scalar_topology/DistributedBranchDecompositionFilter.h>
 #include <vtkm/filter/scalar_topology/worklet/branch_decomposition/HierarchicalVolumetricBranchDecomposer.h>
@@ -209,6 +199,44 @@ void ContourTree::PostExecute()
   Filter::PostExecute();
 }
 
+struct TopVolumeBranchSaddleIsoValueFunctor
+{
+  vtkm::Id nSelectedBranches;
+  std::vector<vtkm::Float64> dbranches;
+
+  public:
+
+  TopVolumeBranchSaddleIsoValueFunctor(vtkm::Id nSelectedBranches) : nSelectedBranches(nSelectedBranches) {
+  }
+  void operator()(const vtkm::cont::ArrayHandle<vtkm::Float32> &arr)
+  {
+     auto topVolBranchSaddleIsoValue = arr.ReadPortal();
+
+     for (vtkm::Id branch = 0; branch < nSelectedBranches; ++branch) {
+          dbranches.push_back(topVolBranchSaddleIsoValue.Get(branch));
+     }
+  }
+
+  void operator()(const vtkm::cont::ArrayHandle<vtkm::Float64> &arr)
+  {
+     auto topVolBranchSaddleIsoValue = arr.ReadPortal();
+
+     for (vtkm::Id branch = 0; branch < nSelectedBranches; ++branch) {
+          dbranches.push_back(topVolBranchSaddleIsoValue.Get(branch));
+     }
+  }
+  template <typename T>
+  void operator()(const T&)
+  {
+    throw vtkm::cont::ErrorBadValue("TopVolumeBranchSaddleIsoValueFunctor Expected Float32 or Float64!");
+  }
+
+  vtkm::Float64 Get(vtkm::Id branch)
+  {
+     return dbranches[branch];
+  }
+};
+
 struct AnalyzerFunctor
 {
   vtkm::filter::scalar_topology::ContourTreeAugmented* filter;
@@ -354,10 +382,61 @@ template<typename DataValueType> void ContourTree::analysis(vtkm::filter::scalar
   }
 }
 
+void ContourTree::distributed_analysis(const vtkm::cont::PartitionedDataSet& result, int mpi_rank) {
+  vtkm::filter::scalar_topology::DistributedBranchDecompositionFilter bd_filter;
+  vtkm::Id numBranches = m_levels;
+    
+    
+  bd_filter.SetSavedBranches(numBranches);
+  auto bd_result = bd_filter.Execute(result);
+
+  for (vtkm::Id ds_no = 0; ds_no < result.GetNumberOfPartitions(); ++ds_no)
+  {
+    auto ds = bd_result.GetPartition(ds_no);
+    std::string branchDecompositionFileName = std::string("BranchDecomposition_Rank_") +
+    std::to_string(static_cast<int>(mpi_rank)) + std::string("_Block_") +
+    std::to_string(static_cast<int>(ds_no)) + std::string(".txt");
+
+    std::ofstream treeStream(branchDecompositionFileName.c_str());
+    treeStream
+      << vtkm::filter::scalar_topology::HierarchicalVolumetricBranchDecomposer::PrintBranches(ds);
+  }
+
+  for (vtkm::Id ds_no = 0; ds_no < result.GetNumberOfPartitions(); ++ds_no)
+  {
+    auto ds = bd_result.GetPartition(ds_no);
+    auto topVolBranchGRId = ds.GetField("TopVolumeBranchGlobalRegularIds")
+                              .GetData()
+                              .AsArrayHandle<vtkm::cont::ArrayHandle<vtkm::Id>>()
+                              .ReadPortal();
+
+    auto topVolBranchSaddleEpsilon = ds.GetField("TopVolumeBranchSaddleEpsilon")
+                                       .GetData()
+                                       .AsArrayHandle<vtkm::cont::ArrayHandle<vtkm::Id>>()
+                                       .ReadPortal();
+
+    vtkm::Id nSelectedBranches = topVolBranchGRId.GetNumberOfValues();
+
+    TopVolumeBranchSaddleIsoValueFunctor iso_functor(nSelectedBranches);
+
+    vtkm::cont::CastAndCall(ds.GetField("TopVolumeBranchSaddleIsoValue").GetData(), iso_functor);
+
+
+    vtkm::Float32 eps = 0.00001;
+
+    for (vtkm::Id branch = 0; branch < nSelectedBranches; ++branch)
+    {
+      m_iso_values[branch] = iso_functor.Get(branch) + (eps * topVolBranchSaddleEpsilon.Get(branch));
+    }
+
+    break;
+  }
+
+  std::sort(m_iso_values.begin(), m_iso_values.end());
+}
+
 void ContourTree::DoExecute()
 {
-  std::cout << "AES:BEGIN:DoExecute" << std::endl;
-
   vtkh::DataSet *old_input = this->m_input;
   const int before_num_domains = this->m_input->GetNumberOfDomains();
 
@@ -396,7 +475,6 @@ void ContourTree::DoExecute()
     delete_input = true;
   }
 
-  std::cout << "AES:END:GhostStripper" << std::endl;
   int mpi_rank = 0;
 
   this->m_output = new DataSet();
@@ -474,7 +552,6 @@ void ContourTree::DoExecute()
     filterField = &filter;
   }
 
-  std::cout << "--- AES BEGIN inDataSet:mpi_rank=" << mpi_rank << std::endl;
 #ifdef DEBUG
   std::cout << "--- BEGIN_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
   inDataSet.PrintSummary( std::cout );
@@ -485,7 +562,6 @@ void ContourTree::DoExecute()
   filterField->SetActiveField(m_field_name);
 
   auto result = filterField->Execute(inDataSet);
-  std::cout << "--- AES DONE inDataSet:mpi_rank=" << mpi_rank << std::endl;
 
   m_iso_values.resize(m_levels);
 
@@ -497,73 +573,19 @@ void ContourTree::DoExecute()
   } // mpi_rank == 0
 #else
   if (mpi_size > 1) 
-  { // AES BranchDecomposition
-        std::cout << "--- AES BEGIN BD:mpi_rank=" << mpi_rank << std::endl;
-        vtkm::filter::scalar_topology::DistributedBranchDecompositionFilter bd_filter;
-	vtkm::Id numBranches = m_levels;
+  { // BranchDecomposition
+    distributed_analysis(result, mpi_rank);
+  } 
+  else
+  {
+    AnalyzerFunctor analyzerFunctor(*this, (vtkm::filter::scalar_topology::ContourTreeAugmented *) filterField);
 
-
-	bd_filter.SetSavedBranches(numBranches);
-        auto bd_result = bd_filter.Execute(result);
-        std::cout << "--- AES END BD:mpi_rank=" << mpi_rank << std::endl;
-
-        for (vtkm::Id ds_no = 0; ds_no < result.GetNumberOfPartitions(); ++ds_no)
-        {
-          auto ds = bd_result.GetPartition(ds_no);
-          std::string branchDecompositionFileName = std::string("BranchDecomposition_Rank_") +
-            std::to_string(static_cast<int>(mpi_rank)) + std::string("_Block_") +
-            std::to_string(static_cast<int>(ds_no)) + std::string(".txt");
-
-          std::ofstream treeStream(branchDecompositionFileName.c_str());
-          treeStream
-            << vtkm::filter::scalar_topology::HierarchicalVolumetricBranchDecomposer::PrintBranches(
-                 ds);
-        }
-        for (vtkm::Id ds_no = 0; ds_no < result.GetNumberOfPartitions(); ++ds_no)
-	{
-          auto ds = bd_result.GetPartition(ds_no);
-	  auto topVolBranchGRId = ds.GetField("TopVolumeBranchGlobalRegularIds")
-                                    .GetData()
-                                    .AsArrayHandle<vtkm::cont::ArrayHandle<vtkm::Id>>()
-                                    .ReadPortal();
-
-	  auto topVolBranchSaddleEpsilon = ds.GetField("TopVolumeBranchSaddleEpsilon")
-                                             .GetData()
-                                             .AsArrayHandle<vtkm::cont::ArrayHandle<vtkm::Id>>()
-                                             .ReadPortal();
-          auto topVolBranchSaddleIsoValue = ds.GetField("TopVolumeBranchSaddleIsoValue")
-                                              .GetData()
-                                              .AsArrayHandle<vtkm::cont::ArrayHandle<vtkm::Float32>>()
-                                              .ReadPortal();
-	  vtkm::Id nSelectedBranches = topVolBranchGRId.GetNumberOfValues();
-
-	  vtkm::Float32 eps = 0.00001;
-
-	  std::cout << "AES: I AM HERE:nSelectedBranches=" << nSelectedBranches << std::endl;
-
-          for (vtkm::Id branch = 0; branch < nSelectedBranches; ++branch)
-          {
-	    // std::cout << "AES: I AM HERE:PUSH:" <<  topVolBranchSaddleIsoValue.Get(branch) << std::endl;
-	    // std::cout << "AES: I AM HERE:PUSH:" <<  eps << std::endl;
-	    // std::cout << "AES: I AM HERE:PUSH:" <<  topVolBranchSaddleEpsilon.Get(branch) << std::endl;
-	    // std::cout << "AES: I AM HERE:PUSH:RANK=" << mpi_rank << ":" << topVolBranchSaddleIsoValue.Get(branch) + eps * topVolBranchSaddleEpsilon.Get(branch) << std::endl;
-            m_iso_values[branch] = topVolBranchSaddleIsoValue.Get(branch) + (eps * topVolBranchSaddleEpsilon.Get(branch));
-          }
-          std::sort(m_iso_values.begin(), m_iso_values.end());
-        }
-   } 
-   else
-   {
-     std::cout << "--- AES YES:mpi_rank=" << mpi_rank << std::endl;
-     AnalyzerFunctor analyzerFunctor(*this, (vtkm::filter::scalar_topology::ContourTreeAugmented *) filterField);
-
-     analyzerFunctor.SetDataFieldIsSorted(false);
-     vtkm::cont::CastAndCall(inDataSet.GetPartitions()[0].GetField(m_field_name).GetData(), analyzerFunctor);
-   }
+    analyzerFunctor.SetDataFieldIsSorted(false);
+    vtkm::cont::CastAndCall(inDataSet.GetPartitions()[0].GetField(m_field_name).GetData(), analyzerFunctor);
+  }
 #endif // VTKH_PARALLEL
 
 #ifdef VTKH_PARALLEL
-  std::cout << "AES: BCAST:m_iso_values[0]=" << &m_iso_values[0] << std::endl;
   MPI_Bcast(&m_iso_values[0], m_levels, MPI_DOUBLE, 0, mpi_comm);
 #endif // VTKH_PARALLEL
 
