@@ -5,6 +5,7 @@
 // vtkm includes
 #include <vtkm/filter/scalar_topology/ContourTreeUniformDistributed.h>
 #include <vtkm/filter/scalar_topology/DistributedBranchDecompositionFilter.h>
+#include <vtkm/filter/scalar_topology/SelectTopVolumeContoursFilter.h>
 #include <vtkm/filter/scalar_topology/worklet/branch_decomposition/HierarchicalVolumetricBranchDecomposer.h>
 #include <vtkm/filter/scalar_topology/worklet/contourtree_augmented/PrintVectors.h>
 #include <vtkm/filter/scalar_topology/worklet/contourtree_augmented/ProcessContourTree.h>
@@ -384,12 +385,9 @@ template<typename DataValueType> void ContourTree::analysis(vtkm::filter::scalar
 
 void ContourTree::distributed_analysis(const vtkm::cont::PartitionedDataSet& result, int mpi_rank) {
   vtkm::filter::scalar_topology::DistributedBranchDecompositionFilter bd_filter;
-  vtkm::Id numBranches = m_levels;
-    
-    
-  bd_filter.SetSavedBranches(numBranches);
   auto bd_result = bd_filter.Execute(result);
 
+#if 0
   for (vtkm::Id ds_no = 0; ds_no < result.GetNumberOfPartitions(); ++ds_no)
   {
     auto ds = bd_result.GetPartition(ds_no);
@@ -401,6 +399,13 @@ void ContourTree::distributed_analysis(const vtkm::cont::PartitionedDataSet& res
     treeStream
       << vtkm::filter::scalar_topology::HierarchicalVolumetricBranchDecomposer::PrintBranches(ds);
   }
+#endif
+
+  vtkm::filter::scalar_topology::SelectTopVolumeContoursFilter tp_filter;
+  vtkm::Id numBranches = m_levels;
+
+  tp_filter.SetSavedBranches(numBranches);
+  bd_result = tp_filter.Execute(bd_result);
 
   for (vtkm::Id ds_no = 0; ds_no < result.GetNumberOfPartitions(); ++ds_no)
   {
@@ -436,7 +441,13 @@ void ContourTree::distributed_analysis(const vtkm::cont::PartitionedDataSet& res
 }
 
 void ContourTree::DoExecute()
-{
+{ 
+  vtkm::cont::Timer totalTime;
+
+  totalTime.Start();
+
+  vtkm::Float64 prevTime = totalTime.GetElapsedTime();
+
   vtkh::DataSet *old_input = this->m_input;
   const int before_num_domains = this->m_input->GetNumberOfDomains();
 
@@ -475,6 +486,7 @@ void ContourTree::DoExecute()
     delete_input = true;
   }
 
+  vtkm::Float64 elapsedTime = totalTime.GetElapsedTime() - prevTime;
   int mpi_rank = 0;
 
   this->m_output = new DataSet();
@@ -507,6 +519,7 @@ void ContourTree::DoExecute()
   this->m_input->GetDomain(0, dom, domain_id);
   inDataSet.AppendPartition(dom);
 
+#ifdef DEBUG
   if( mpi_size != 1 )
   {
     std::ostringstream ostr;
@@ -514,9 +527,12 @@ void ContourTree::DoExecute()
        << " coord system range: " << dom.GetCoordinateSystem(0).GetRange() << std::endl;
     std::cout << ostr.str();
   }
-#ifdef DEBUG
 #endif
 #endif // VTKH_PARALLEL
+
+  if (mpi_rank == 0) {
+  std::cout << "AES:PERF:RECENTER_AND_GHOST_STRIPPER:mpi_rank=" << mpi_rank << ":elapsedTime=" << elapsedTime  << std::endl;
+  }
 
   vtkm::filter::FilterField *filterField;
 
@@ -538,6 +554,8 @@ void ContourTree::DoExecute()
 #endif
 #else // VTKH_PARALLEL
   // TODO If we only have one partition use augmented ....
+  // TODO SET VTKM to do vtkm::cont::LogLovel::Info
+  // vtkm::filter::scalar_topology::ContourTreeUniformDistributed filter(vtkm::cont::LogLevel::Info, vtkm::cont::LogLevel::Info);
   vtkm::filter::scalar_topology::ContourTreeUniformDistributed filter;
   vtkm::filter::scalar_topology::ContourTreeAugmented aug_filter(false, true);
 
@@ -552,6 +570,8 @@ void ContourTree::DoExecute()
     filterField = &filter;
   }
 
+  prevTime = totalTime.GetElapsedTime();
+
 #ifdef DEBUG
   std::cout << "--- BEGIN_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
   inDataSet.PrintSummary( std::cout );
@@ -561,9 +581,16 @@ void ContourTree::DoExecute()
 
   filterField->SetActiveField(m_field_name);
 
+  prevTime = totalTime.GetElapsedTime();
   auto result = filterField->Execute(inDataSet);
+  elapsedTime = totalTime.GetElapsedTime() - prevTime;
+  if (mpi_rank == 0) {
+  std::cout << "AES:PERF::CONTOUR_TREE_COMPUTE:mpi_rank=" << mpi_rank << ":elapsedTime=" << elapsedTime  << std::endl;
+  }
 
   m_iso_values.resize(m_levels);
+
+  prevTime = totalTime.GetElapsedTime();
 
 #ifndef VTKH_PARALLEL
   if (mpi_rank == 0) {
@@ -584,6 +611,11 @@ void ContourTree::DoExecute()
     vtkm::cont::CastAndCall(inDataSet.GetPartitions()[0].GetField(m_field_name).GetData(), analyzerFunctor);
   }
 #endif // VTKH_PARALLEL
+
+  elapsedTime = totalTime.GetElapsedTime() - prevTime;
+  if (mpi_rank == 0) {
+  std::cout << "AES:PERF::CONTOUR_TREE_ANALYSIS:mpi_rank=" << mpi_rank << ":elapsedTime=" << elapsedTime  << std::endl;
+  }
 
 #ifdef VTKH_PARALLEL
   MPI_Bcast(&m_iso_values[0], m_levels, MPI_DOUBLE, 0, mpi_comm);
