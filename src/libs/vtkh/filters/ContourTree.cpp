@@ -442,12 +442,6 @@ void ContourTree::distributed_analysis(const vtkm::cont::PartitionedDataSet& res
 
 void ContourTree::DoExecute()
 { 
-  vtkm::cont::Timer totalTime;
-
-  totalTime.Start();
-
-  vtkm::Float64 prevTime = totalTime.GetElapsedTime();
-
   vtkh::DataSet *old_input = this->m_input;
   const int before_num_domains = this->m_input->GetNumberOfDomains();
 
@@ -486,7 +480,6 @@ void ContourTree::DoExecute()
     delete_input = true;
   }
 
-  vtkm::Float64 elapsedTime = totalTime.GetElapsedTime() - prevTime;
   int mpi_rank = 0;
 
   this->m_output = new DataSet();
@@ -530,11 +523,7 @@ void ContourTree::DoExecute()
 #endif
 #endif // VTKH_PARALLEL
 
-  if (mpi_rank == 0) {
-  std::cout << "AES:PERF:RECENTER_AND_GHOST_STRIPPER:mpi_rank=" << mpi_rank << ":elapsedTime=" << elapsedTime  << std::endl;
-  }
-
-  vtkm::filter::FilterField *filterField;
+  vtkm::filter::Filter *filterField;
 
 #ifndef VTKH_PARALLEL
   bool useMarchingCubes = false;
@@ -545,15 +534,12 @@ void ContourTree::DoExecute()
   //Convert the mesh of values into contour tree, pairs of vertex ids
   vtkm::filter::scalar_topology::ContourTreeAugmented filter(useMarchingCubes, computeRegularStructure);
 
-  filterField = &filter;
-
 #ifdef DEBUG
   std::cout << "--- BEGIN_SUMMARY inDataSet" << std::endl;
   inDataSet.PrintSummary( std::cout );
   std::cout << "--- END_SUMMARY inDataSet" << std::endl;
 #endif
 #else // VTKH_PARALLEL
-  // TODO If we only have one partition use augmented ....
   // TODO SET VTKM to do vtkm::cont::LogLovel::Info
   // vtkm::filter::scalar_topology::ContourTreeUniformDistributed filter(vtkm::cont::LogLevel::Info, vtkm::cont::LogLevel::Info);
   vtkm::filter::scalar_topology::ContourTreeUniformDistributed filter;
@@ -570,8 +556,6 @@ void ContourTree::DoExecute()
     filterField = &filter;
   }
 
-  prevTime = totalTime.GetElapsedTime();
-
 #ifdef DEBUG
   std::cout << "--- BEGIN_SUMMARY inDataSet:mpi_rank=" << mpi_rank << std::endl;
   inDataSet.PrintSummary( std::cout );
@@ -581,16 +565,9 @@ void ContourTree::DoExecute()
 
   filterField->SetActiveField(m_field_name);
 
-  prevTime = totalTime.GetElapsedTime();
   auto result = filterField->Execute(inDataSet);
-  elapsedTime = totalTime.GetElapsedTime() - prevTime;
-  if (mpi_rank == 0) {
-  std::cout << "AES:PERF::CONTOUR_TREE_COMPUTE:mpi_rank=" << mpi_rank << ":elapsedTime=" << elapsedTime  << std::endl;
-  }
 
   m_iso_values.resize(m_levels);
-
-  prevTime = totalTime.GetElapsedTime();
 
 #ifndef VTKH_PARALLEL
   if (mpi_rank == 0) {
@@ -611,11 +588,6 @@ void ContourTree::DoExecute()
     vtkm::cont::CastAndCall(inDataSet.GetPartitions()[0].GetField(m_field_name).GetData(), analyzerFunctor);
   }
 #endif // VTKH_PARALLEL
-
-  elapsedTime = totalTime.GetElapsedTime() - prevTime;
-  if (mpi_rank == 0) {
-  std::cout << "AES:PERF::CONTOUR_TREE_ANALYSIS:mpi_rank=" << mpi_rank << ":elapsedTime=" << elapsedTime  << std::endl;
-  }
 
 #ifdef VTKH_PARALLEL
   MPI_Bcast(&m_iso_values[0], m_levels, MPI_DOUBLE, 0, mpi_comm);
